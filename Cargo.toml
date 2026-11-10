@@ -33,6 +33,7 @@ repository = "https://github.com/linebender/parley"
 [workspace.dependencies]
 accesskit = "0.24.0"
 bytemuck = { version = "1.25.0", default-features = false }
+databake = { version = "0.2.1", default-features = false, features = ["derive"] }
 fontique = { version = "0.8.0", default-features = false, path = "fontique" }
 harfrust = { version = "0.5.2", default-features = false }
 foldhash = { version = "0.2.0", default-features = false }

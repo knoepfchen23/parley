@@ -16,7 +16,11 @@ use icu_collections::codepointtrie::CodePointTrie;
 /// [`Properties`](crate::Properties).
 #[derive(Clone, Debug, Eq, PartialEq, yoke::Yokeable, zerofrom::ZeroFrom)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
-#[cfg_attr(feature = "datagen", derive(serde::Serialize))]
+#[cfg_attr(
+    feature = "datagen",
+    derive(serde::Serialize, databake::Bake),
+    databake(path = parley_data::provider)
+)]
 pub struct CompositeProperties<'data> {
     /// The table: a code point to the bits of its properties.
     #[cfg_attr(feature = "serde", serde(borrow))]
@@ -35,3 +39,29 @@ icu_provider::data_marker!(
     CompositeProperties<'static>,
     is_singleton = true
 );
+
+#[cfg(all(test, feature = "datagen"))]
+mod tests {
+    extern crate std;
+
+    use super::*;
+    use core::hash::{Hash, Hasher};
+    use icu_collections::codepointtrie::planes;
+    use icu_provider::DataPayload;
+    use icu_provider::dynutil::UpcastDataPayload;
+    use icu_provider::export::ExportMarker;
+
+    /// The table meets what ICU4X's exporters ask of a data struct.
+    #[test]
+    fn the_table_can_be_exported() {
+        let trie = planes::get_planes_trie()
+            .try_alloc_map_value(|plane| Ok::<u32, ()>(u32::from(plane)))
+            .unwrap();
+        let payload =
+            DataPayload::<ParleyCompositePropertiesV1>::from_owned(CompositeProperties { trie });
+        let exported = ExportMarker::upcast(payload);
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        exported.hash(&mut hasher);
+        let _ = hasher.finish();
+    }
+}
