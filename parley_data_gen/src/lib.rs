@@ -3,6 +3,8 @@
 
 //! See `./main.rs`.
 
+use icu_codepointtrie_builder::{CodePointTrieBuilder, CodePointTrieBuilderData};
+use icu_collections::codepointtrie::{CodePointTrie, TrieType};
 use icu_properties::props::{GeneralCategory, GraphemeClusterBreak, Script};
 use icu_properties::{
     CodePointMapData, CodePointSetData,
@@ -11,6 +13,7 @@ use icu_properties::{
     },
 };
 use parley_data::Properties;
+use parley_data::provider::CompositeProperties;
 use std::fmt::Write as _;
 use std::io::{BufWriter, Write};
 
@@ -26,35 +29,58 @@ pub struct Config {
     pub unsafe_access: bool,
 }
 
+/// The combined properties of every code point from `0` to `0x10FFFF`, as the
+/// bits of a [`Properties`], from ICU4X's compiled data.
+pub fn composite_values() -> Vec<u32> {
+    let mut values = Vec::<u32>::with_capacity(0x110000);
+    for cp in 0_u32..=0x10FFFF {
+        let v = Properties::new(
+            CodePointMapData::<Script>::new().get32(cp),
+            CodePointMapData::<GeneralCategory>::new().get32(cp),
+            CodePointMapData::<GraphemeClusterBreak>::new().get32(cp),
+            CodePointMapData::<BidiClass>::new().get32(cp),
+            CodePointSetData::new::<Emoji>().contains32(cp)
+                || CodePointSetData::new::<ExtendedPictographic>().contains32(cp),
+            CodePointSetData::new::<VariationSelector>().contains32(cp),
+            CodePointSetData::new::<RegionalIndicator>().contains32(cp),
+            // See: https://github.com/unicode-org/icu4x/blob/ee5399a77a6b94efb5d4b60678bb458c5eedb25d/components/segmenter/src/line.rs#L338-L351
+            matches!(
+                CodePointMapData::<LineBreak>::new().get32(cp),
+                LineBreak::MandatoryBreak
+                    | LineBreak::CarriageReturn
+                    | LineBreak::LineFeed
+                    | LineBreak::NextLine
+            ),
+        );
+        values.push(v.into());
+    }
+    values
+}
+
+/// `values`, one per code point from `0` to `0x10FFFF`, as the
+/// `CodePointTrie` that [`CompositeProperties`] carries.
+pub fn composite_trie(values: &[u32]) -> CodePointTrie<'static, u32> {
+    CodePointTrieBuilder {
+        data: CodePointTrieBuilderData::ValuesByCodePoint(values),
+        default_value: 0,
+        error_value: 0,
+        trie_type: TrieType::Fast,
+    }
+    .build()
+}
+
+/// The combined table of ICU4X's compiled data as the data Parley takes
+/// from a provider.
+pub fn composite_properties() -> CompositeProperties<'static> {
+    CompositeProperties {
+        trie: composite_trie(&composite_values()),
+    }
+}
+
 /// Exports ICU data as `PackTab` lookup tables + generated Rust code into the `out` directory.
 pub fn generate(out: std::path::PathBuf, config: &Config) {
     // Generate the data required for `CompositeProps`.
-    let values = {
-        // Dense values table for 0..=0x10FFFF
-        let mut values = Vec::<u32>::with_capacity(0x110000);
-        for cp in 0_u32..=0x10FFFF {
-            let v = Properties::new(
-                CodePointMapData::<Script>::new().get32(cp),
-                CodePointMapData::<GeneralCategory>::new().get32(cp),
-                CodePointMapData::<GraphemeClusterBreak>::new().get32(cp),
-                CodePointMapData::<BidiClass>::new().get32(cp),
-                CodePointSetData::new::<Emoji>().contains32(cp)
-                    || CodePointSetData::new::<ExtendedPictographic>().contains32(cp),
-                CodePointSetData::new::<VariationSelector>().contains32(cp),
-                CodePointSetData::new::<RegionalIndicator>().contains32(cp),
-                // See: https://github.com/unicode-org/icu4x/blob/ee5399a77a6b94efb5d4b60678bb458c5eedb25d/components/segmenter/src/line.rs#L338-L351
-                matches!(
-                    CodePointMapData::<LineBreak>::new().get32(cp),
-                    LineBreak::MandatoryBreak
-                        | LineBreak::CarriageReturn
-                        | LineBreak::LineFeed
-                        | LineBreak::NextLine
-                ),
-            );
-            values.push(v.into());
-        }
-        values
-    };
+    let values = composite_values();
     let scalar_data: Vec<i64> = values.iter().map(|&v| v as i64).collect();
 
     let (info, best) = packtab::pack_table(&scalar_data, Some(0), config.compression);
