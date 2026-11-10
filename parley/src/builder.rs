@@ -49,6 +49,14 @@ impl<B: Brush> RangedBuilder<'_, B> {
         self.lcx.inline_boxes.push(inline_box);
     }
 
+    /// Begins a word at each of `starts`, byte offsets into the text, beside
+    /// the words the word segmenter finds: boundaries an application knows
+    /// better, as the clauses an input method converted. A start inside a
+    /// character is ignored.
+    pub fn push_word_starts(&mut self, starts: impl IntoIterator<Item = usize>) {
+        self.lcx.word_starts.extend(starts);
+    }
+
     pub fn build_into(self, layout: &mut Layout<B>, text: impl AsRef<str>) {
         // Apply RangedStyleBuilder styles directly to style-table/style-run state.
         self.lcx

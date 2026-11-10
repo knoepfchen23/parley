@@ -336,3 +336,46 @@ fn shaping_reads_the_properties_harfrust_has_of_its_own() {
         &differ[..differ.len().min(12)]
     );
 }
+
+/// Word starts given to the builder add to the segmenter's and take none
+/// away (Mosaik 28.7.21).
+#[test]
+fn further_word_starts_add_to_the_dictionary_s() {
+    let text = "日本語の文章";
+    let honbun = text.find('本').unwrap();
+    let mut layout_context = handed_context();
+    let mut font_context = FontContext::default();
+    {
+        let mut builder = layout_context.ranged_builder(&mut font_context, text, 1., true);
+        builder.push_word_starts([honbun, 1]);
+        _ = builder.build(text);
+    }
+    let starts: Vec<usize> = text
+        .char_indices()
+        .map(|(at, _)| at)
+        .zip(
+            layout_context
+                .info
+                .iter()
+                .map(|(info, _)| info.is_word_start()),
+        )
+        .filter(|&(at, start)| at != 0 && start)
+        .map(|(at, _)| at)
+        .collect();
+    let dictionary = word_starts(handed_context(), text);
+    assert!(
+        !dictionary.contains(&honbun),
+        "the dictionary keeps 日本語 whole"
+    );
+    assert!(
+        starts.contains(&honbun),
+        "a further start begins a word: {starts:?}"
+    );
+    for at in &dictionary {
+        assert!(starts.contains(at), "the dictionary's start {at} stays");
+    }
+    // A start inside a character begins nothing; the next build of the same
+    // context has none of them.
+    assert!(!starts.contains(&1));
+    assert_eq!(word_starts(layout_context, text), dictionary);
+}

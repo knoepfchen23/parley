@@ -38,6 +38,10 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
 
     // Unicode analysis data sources (provided by icu)
     pub(crate) analysis_data_sources: AnalysisDataSources,
+
+    /// Further starts of words for the layout being built, by byte offset,
+    /// beside those of the word segmenter.
+    pub(crate) word_starts: Vec<usize>,
 }
 
 impl<B: Brush> LayoutContext<B> {
@@ -92,6 +96,7 @@ impl<B: Brush> LayoutContext<B> {
             info: vec![],
             analysis_data_sources,
             scx: ShapeContext::default(),
+            word_starts: vec![],
         }
     }
 
@@ -224,6 +229,7 @@ impl<B: Brush> LayoutContext<B> {
         self.inline_boxes.clear();
         self.info.clear();
         self.bidi.clear();
+        self.word_starts.clear();
     }
 }
 

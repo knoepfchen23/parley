@@ -559,6 +559,11 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
         .segment_str(text)
         .peekable();
 
+    // Further word starts the builder was given, sorted for lookup.
+    let mut further_word_starts = core::mem::take(&mut lcx.word_starts);
+    further_word_starts.sort_unstable();
+    further_word_starts.dedup();
+
     // Merge boundaries - line takes precedence over word
     let mut lb_iter = line_boundary_positions.iter().peekable();
     let boundary_iter = text.char_indices().map(|(byte_pos, ch)| {
@@ -580,7 +585,7 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
         }
 
         let mut boundary = Boundary::None;
-        let mut is_word_start = false;
+        let mut is_word_start = further_word_starts.binary_search(&byte_pos).is_ok();
         if let Some(&w) = wb_iter.peek() {
             if w == byte_pos {
                 boundary = Boundary::Word;

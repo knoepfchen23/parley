@@ -105,6 +105,8 @@ where
     /// Styles of parts of the preedit, by byte ranges relative to its start.
     /// Empty, the whole preedit is underlined.
     compose_styles: Vec<(Range<usize>, StyleProperty<'static, T>)>,
+    /// Further starts of words, by byte offset into the buffer.
+    word_starts: Vec<usize>,
     /// Whether the cursor should be shown. The IME can request to hide the cursor.
     show_cursor: bool,
     width: Option<f32>,
@@ -140,6 +142,7 @@ where
             selection: Selection::default(),
             compose: None,
             compose_styles: Vec::new(),
+            word_starts: Vec::new(),
             show_cursor: true,
             width: None,
             font_size,
@@ -1004,6 +1007,16 @@ where
     }
 
     /// Set the width of the layout.
+    /// Begins a word at each of `starts`, byte offsets into the buffer (the
+    /// preedit included), beside the words the word segmenter finds; moving
+    /// and selecting by word and the accessibility tree's words follow them.
+    /// They stay until set again, whatever the text becomes: the caller keeps
+    /// them in step with its edits.
+    pub fn set_word_starts(&mut self, starts: Vec<usize>) {
+        self.word_starts = starts;
+        self.layout_dirty = true;
+    }
+
     pub fn set_width(&mut self, width: Option<f32>) {
         self.width = width;
         self.layout_dirty = true;
@@ -1258,6 +1271,7 @@ where
         for prop in self.default_style.inner().values() {
             builder.push_default(prop.to_owned());
         }
+        builder.push_word_starts(self.word_starts.iter().copied());
         if let Some(preedit_range) = &self.compose {
             if self.compose_styles.is_empty() {
                 builder.push(StyleProperty::Underline(true), preedit_range.clone());
