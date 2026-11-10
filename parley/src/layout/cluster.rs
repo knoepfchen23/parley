@@ -174,9 +174,11 @@ impl<'a, B: Brush> Cluster<'a, B> {
         self.data.is_ligature_component()
     }
 
-    /// Returns `true` if the cluster is a word boundary.
+    /// Returns `true` if the cluster is a word boundary: a word begins at
+    /// it, by the word segmenter. A line may also break where no word
+    /// begins, as between the ideographs of one Japanese word.
     pub fn is_word_boundary(&self) -> bool {
-        self.data.info.is_boundary()
+        self.data.info.is_word_start()
     }
 
     /// Returns `true` if the cluster is a soft line break.

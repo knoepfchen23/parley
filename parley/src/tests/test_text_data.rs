@@ -180,6 +180,47 @@ fn japanese_words_begin_where_the_dictionary_says() {
     for start in &starts {
         assert!(found.contains(start), "a boundary at {start}: {found:?}");
     }
+    // A line may break between any two ideographs; a word begins only where
+    // the dictionary says.
+    assert_eq!(word_starts(handed_context(), text), starts);
+    assert_ne!(word_starts(LayoutContext::new(), text), starts);
+}
+
+/// The offsets inside `text` where Parley begins a word.
+fn word_starts(mut layout_context: LayoutContext, text: &str) -> Vec<usize> {
+    let mut font_context = FontContext::default();
+    {
+        let builder = layout_context.ranged_builder(&mut font_context, text, 1., true);
+        _ = builder.build(text);
+    }
+    text.char_indices()
+        .map(|(at, _)| at)
+        .zip(
+            layout_context
+                .info
+                .iter()
+                .map(|(info, _)| info.is_word_start()),
+        )
+        .filter(|&(at, start)| at != 0 && start)
+        .map(|(at, _)| at)
+        .collect()
+}
+
+#[test]
+fn latin_words_begin_where_lines_may_break_and_at_punctuation() {
+    // Every place a line may break in Latin text is also the start of a
+    // word, so that a step by word in Latin text is as before.
+    for text in ["one two-three", "a/b c.d (e) f, g", "ABC DEF\nG"] {
+        let handed = boundaries(handed_context(), text);
+        let lines = offsets_of(&handed, &[Boundary::Line, Boundary::Mandatory]);
+        let words = word_starts(handed_context(), text);
+        for at in lines {
+            assert!(
+                words.contains(&at),
+                "{text:?}: a line at {at}, no word: {words:?}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -58,13 +58,15 @@ impl ClusterData {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) struct ClusterInfo {
     boundary: Boundary,
+    is_word_start: bool,
     source_char: char,
 }
 
 impl ClusterInfo {
-    pub(crate) fn new(boundary: Boundary, source_char: char) -> Self {
+    pub(crate) fn new(boundary: Boundary, is_word_start: bool, source_char: char) -> Self {
         Self {
             boundary,
+            is_word_start,
             source_char,
         }
     }
@@ -79,9 +81,10 @@ impl ClusterInfo {
         to_whitespace(self.source_char)
     }
 
-    /// Returns if the cluster is a line boundary.
-    pub(crate) fn is_boundary(self) -> bool {
-        self.boundary != Boundary::None
+    /// Returns if a word begins at the cluster, by the word segmenter alone:
+    /// a line may also break where no word begins.
+    pub(crate) fn is_word_start(self) -> bool {
+        self.is_word_start
     }
 
     /// Returns if the cluster is an emoji.
@@ -940,7 +943,11 @@ fn push_cluster(
     };
 
     clusters.push(ClusterData {
-        info: ClusterInfo::new(char_info.0.boundary, cluster_start_char.1),
+        info: ClusterInfo::new(
+            char_info.0.boundary,
+            char_info.0.is_word_start(),
+            cluster_start_char.1,
+        ),
         flags: (&cluster_type).into(),
         style_index: char_info.1,
         glyph_len: final_glyph_len,

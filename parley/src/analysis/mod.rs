@@ -252,6 +252,7 @@ impl CharInfo {
     const EMOJI_OR_PICTOGRAPH_SHIFT: u8 = 3;
     const CONTRIBUTES_TO_SHAPING_SHIFT: u8 = 4;
     const FORCE_NORMALIZE_SHIFT: u8 = 5;
+    const WORD_START_SHIFT: u8 = 6;
 
     #[allow(
         dead_code,
@@ -267,6 +268,7 @@ impl CharInfo {
     const EMOJI_OR_PICTOGRAPH_MASK: u8 = 1 << Self::EMOJI_OR_PICTOGRAPH_SHIFT;
     const CONTRIBUTES_TO_SHAPING_MASK: u8 = 1 << Self::CONTRIBUTES_TO_SHAPING_SHIFT;
     const FORCE_NORMALIZE_MASK: u8 = 1 << Self::FORCE_NORMALIZE_SHIFT;
+    const WORD_START_MASK: u8 = 1 << Self::WORD_START_SHIFT;
 
     fn new(
         boundary: Boundary,
@@ -280,6 +282,7 @@ impl CharInfo {
         is_emoji_or_pictograph: bool,
         contributes_to_shaping: bool,
         force_normalize: bool,
+        is_word_start: bool,
     ) -> Self {
         Self {
             boundary,
@@ -292,7 +295,8 @@ impl CharInfo {
                 | (is_control as u8) << Self::CONTROL_SHIFT
                 | (is_emoji_or_pictograph as u8) << Self::EMOJI_OR_PICTOGRAPH_SHIFT
                 | (contributes_to_shaping as u8) << Self::CONTRIBUTES_TO_SHAPING_SHIFT
-                | (force_normalize as u8) << Self::FORCE_NORMALIZE_SHIFT,
+                | (force_normalize as u8) << Self::FORCE_NORMALIZE_SHIFT
+                | (is_word_start as u8) << Self::WORD_START_SHIFT,
         }
     }
 
@@ -332,6 +336,14 @@ impl CharInfo {
     #[inline(always)]
     pub(crate) fn force_normalize(self) -> bool {
         self.flags & Self::FORCE_NORMALIZE_MASK != 0
+    }
+
+    /// Whether a word begins at this character, by the word segmenter
+    /// alone. A line may break where no word begins, as between the
+    /// ideographs of one Japanese word, and [`Self::boundary`] keeps the
+    /// line's boundary where both fall on one character.
+    pub(crate) fn is_word_start(self) -> bool {
+        self.flags & Self::WORD_START_MASK != 0
     }
 }
 
@@ -547,9 +559,11 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
         }
 
         let mut boundary = Boundary::None;
+        let mut is_word_start = false;
         if let Some(&w) = wb_iter.peek() {
             if w == byte_pos {
                 boundary = Boundary::Word;
+                is_word_start = true;
                 _ = wb_iter.next();
             }
         }
@@ -560,7 +574,7 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
             }
         }
 
-        (boundary, ch)
+        (boundary, is_word_start, ch)
     });
 
     let properties = |c| lcx.analysis_data_sources.properties(c);
@@ -573,59 +587,63 @@ pub(crate) fn analyze_text<B: Brush>(lcx: &mut LayoutContext<B>, mut text: &str)
         // characters (like '\n') exist at an index position one higher than the respective
         // character's index, but we need our iterators to align, and the rest are simply
         // character-indexed.
-        .fold(false, |is_mandatory_linebreak, (boundary, ch)| {
-            let properties = properties(ch);
-            let script = properties.script();
-            let grapheme_cluster_break = properties.grapheme_cluster_break();
-            let bidi_class = properties.bidi_class();
-            let general_category = properties.general_category();
-            let is_emoji_or_pictograph = properties.is_emoji_or_pictograph();
-            let is_variation_selector = properties.is_variation_selector();
-            let is_region_indicator = properties.is_region_indicator();
-            let next_mandatory_linebreak = properties.is_mandatory_linebreak();
+        .fold(
+            false,
+            |is_mandatory_linebreak, (boundary, is_word_start, ch)| {
+                let properties = properties(ch);
+                let script = properties.script();
+                let grapheme_cluster_break = properties.grapheme_cluster_break();
+                let bidi_class = properties.bidi_class();
+                let general_category = properties.general_category();
+                let is_emoji_or_pictograph = properties.is_emoji_or_pictograph();
+                let is_variation_selector = properties.is_variation_selector();
+                let is_region_indicator = properties.is_region_indicator();
+                let next_mandatory_linebreak = properties.is_mandatory_linebreak();
 
-            let boundary = if is_mandatory_linebreak {
-                Boundary::Mandatory
-            } else {
-                boundary
-            };
+                let boundary = if is_mandatory_linebreak {
+                    Boundary::Mandatory
+                } else {
+                    boundary
+                };
 
-            let force_normalize = {
-                // "Extend" break chars should be normalized first, with two exceptions
-                if matches!(grapheme_cluster_break, GraphemeClusterBreak::Extend) &&
+                let force_normalize = {
+                    // "Extend" break chars should be normalized first, with two exceptions
+                    if matches!(grapheme_cluster_break, GraphemeClusterBreak::Extend) &&
                     ch as u32 != 0x200C && // Is not a Zero Width Non-Joiner &&
                     !is_variation_selector
-                {
-                    true
-                } else {
-                    // All spacing mark break chars should be normalized first.
-                    matches!(grapheme_cluster_break, GraphemeClusterBreak::SpacingMark)
-                }
-            };
+                    {
+                        true
+                    } else {
+                        // All spacing mark break chars should be normalized first.
+                        matches!(grapheme_cluster_break, GraphemeClusterBreak::SpacingMark)
+                    }
+                };
 
-            needs_bidi_resolution |= crate::bidi::needs_bidi_resolution(bidi_class);
-            // TODO: maybe extend Properties to u64 to fit BidiMirroringGlyph
-            let bracket = lcx.analysis_data_sources.brackets().get(ch);
+                needs_bidi_resolution |= crate::bidi::needs_bidi_resolution(bidi_class);
+                // TODO: maybe extend Properties to u64 to fit BidiMirroringGlyph
+                let bracket = lcx.analysis_data_sources.brackets().get(ch);
 
-            lcx.info.push((
-                CharInfo::new(
-                    boundary,
-                    script,
-                    grapheme_cluster_break,
-                    bidi_class,
-                    bracket,
-                    is_variation_selector,
-                    is_region_indicator,
-                    general_category == GeneralCategory::Control,
-                    is_emoji_or_pictograph,
-                    contributes_to_shaping(general_category, script),
-                    force_normalize,
-                ),
-                0, // Style index is populated later
-            ));
+                lcx.info.push((
+                    CharInfo::new(
+                        boundary,
+                        script,
+                        grapheme_cluster_break,
+                        bidi_class,
+                        bracket,
+                        is_variation_selector,
+                        is_region_indicator,
+                        general_category == GeneralCategory::Control,
+                        is_emoji_or_pictograph,
+                        contributes_to_shaping(general_category, script),
+                        force_normalize,
+                        is_word_start,
+                    ),
+                    0, // Style index is populated later
+                ));
 
-            next_mandatory_linebreak
-        });
+                next_mandatory_linebreak
+            },
+        );
 
     if needs_bidi_resolution {
         lcx.bidi.resolve(
