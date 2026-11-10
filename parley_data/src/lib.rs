@@ -12,6 +12,8 @@ use icu_properties::props::{BidiClass, GeneralCategory, GraphemeClusterBreak, Sc
 #[cfg(feature = "baked")]
 pub mod generated;
 
+pub mod provider;
+
 /// Unicode character properties relevant for text analysis.
 #[derive(Copy, Clone, Debug)]
 pub struct Properties(u32);
@@ -158,6 +160,14 @@ impl Properties {
 impl From<Properties> for u32 {
     fn from(value: Properties) -> Self {
         value.0
+    }
+}
+
+impl From<u32> for Properties {
+    /// The properties packed in `bits`, as a value of the combined table
+    /// ([`provider::CompositeProperties`]) holds them.
+    fn from(bits: u32) -> Self {
+        Self(bits)
     }
 }
 
