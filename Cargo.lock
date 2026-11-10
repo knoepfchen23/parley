@@ -1772,6 +1772,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
+ "serde",
  "smallvec",
  "zerovec",
 ]
@@ -1792,6 +1793,7 @@ dependencies = [
  "icu_locale_core",
  "icu_properties_data",
  "icu_provider",
+ "serde",
  "zerotrie",
  "zerovec",
 ]
@@ -1833,6 +1835,7 @@ dependencies = [
  "icu_provider",
  "icu_segmenter_data",
  "potential_utf",
+ "serde",
  "utf8_iter",
  "zerovec",
 ]
@@ -2156,6 +2159,9 @@ name = "litemap"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "litrs"
@@ -2910,13 +2916,16 @@ dependencies = [
  "fontique",
  "harfrust",
  "hashbrown 0.16.1",
+ "icu_collections",
  "icu_normalizer",
  "icu_properties",
+ "icu_provider",
  "icu_segmenter",
  "linebender_resource_handle",
  "oxipng",
  "parlance",
  "parley_data",
+ "parley_data_gen",
  "parley_dev",
  "peniko",
  "skrifa 0.40.0",
@@ -5787,8 +5796,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a59c17a5562d507e4b54960e8569ebee33bee890c70aa3fe7b97e85a9fd7851"
 dependencies = [
  "displaydoc",
+ "litemap",
+ "serde_core",
  "yoke",
  "zerofrom",
+ "zerovec",
 ]
 
 [[package]]

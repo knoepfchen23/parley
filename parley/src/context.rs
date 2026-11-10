@@ -11,11 +11,12 @@ use super::resolve::tree::TreeStyleBuilder;
 use super::resolve::{RangedStyleBuilder, ResolveContext, ResolvedStyle, StyleRun};
 use super::style::{Brush, TextStyle};
 
-use crate::analysis::{AnalysisDataSources, CharInfo};
+use crate::analysis::{AnalysisDataSources, CharInfo, TextDataProvider};
 use crate::bidi::BidiResolver;
 use crate::builder::TreeBuilder;
 use crate::inline_box::InlineBox;
 use crate::shape::ShapeContext;
+use icu_provider::DataError;
 
 /// Shared scratch space used when constructing text layouts.
 ///
@@ -40,7 +41,46 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
 }
 
 impl<B: Brush> LayoutContext<B> {
+    /// A context that analyses text with the Unicode data compiled into
+    /// Parley's crates: segmenters without the dictionaries of the scripts
+    /// that set no space between words.
     pub fn new() -> Self {
+        Self::with_sources(AnalysisDataSources::new())
+    }
+
+    /// A context that analyses text with the data of `provider`, built once
+    /// here: ICU4X's segmenters with the dictionaries of Chinese, Japanese,
+    /// Thai, Lao, Khmer and Burmese, its normalizers, the names of scripts,
+    /// the mirrored brackets and Parley's combined table.
+    ///
+    /// An application that ships its Unicode data apart from its code hands
+    /// them here, so that every program reads one version.
+    ///
+    /// # Errors
+    ///
+    /// Where `provider` lacks a datum Parley reads.
+    pub fn try_new_unstable<P: TextDataProvider + ?Sized>(provider: &P) -> Result<Self, DataError> {
+        Ok(Self::with_sources(AnalysisDataSources::try_new_unstable(
+            provider,
+        )?))
+    }
+
+    /// As [`Self::try_new_unstable`], with data serialized by ICU4X's
+    /// exporters, as a postcard blob behind a `BufferProvider`.
+    ///
+    /// # Errors
+    ///
+    /// Where the provider lacks a datum Parley reads or one does not
+    /// deserialize.
+    #[cfg(feature = "serde")]
+    pub fn try_new_with_buffer_provider(
+        provider: &(impl icu_provider::buf::BufferProvider + ?Sized),
+    ) -> Result<Self, DataError> {
+        use icu_provider::buf::AsDeserializingBufferProvider;
+        Self::try_new_unstable(&provider.as_deserializing())
+    }
+
+    fn with_sources(analysis_data_sources: AnalysisDataSources) -> Self {
         Self {
             rcx: ResolveContext::default(),
             style_table: vec![],
@@ -50,7 +90,7 @@ impl<B: Brush> LayoutContext<B> {
             ranged_style_builder: RangedStyleBuilder::default(),
             tree_style_builder: TreeStyleBuilder::default(),
             info: vec![],
-            analysis_data_sources: AnalysisDataSources::new(),
+            analysis_data_sources,
             scx: ShapeContext::default(),
         }
     }

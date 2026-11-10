@@ -3,4 +3,5 @@
 
 mod test_analysis;
 mod test_builders;
+mod test_text_data;
 mod utils;

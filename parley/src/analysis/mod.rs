@@ -3,6 +3,7 @@
 
 pub(crate) mod cluster;
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
@@ -13,41 +14,162 @@ use icu_normalizer::properties::{
     CanonicalComposition, CanonicalCompositionBorrowed, CanonicalDecomposition,
     CanonicalDecompositionBorrowed,
 };
-use icu_properties::props::{BidiMirroringGlyph, GeneralCategory, GraphemeClusterBreak, Script};
-use icu_properties::{
-    CodePointMapData, CodePointMapDataBorrowed, PropertyNamesShort, PropertyNamesShortBorrowed,
+use icu_normalizer::provider::{
+    NormalizerNfcV1, NormalizerNfdDataV1, NormalizerNfdSupplementV1, NormalizerNfdTablesV1,
 };
-use icu_segmenter::options::{LineBreakOptions, LineBreakWordOption, WordBreakInvariantOptions};
+use icu_properties::props::{BidiMirroringGlyph, GeneralCategory, GraphemeClusterBreak, Script};
+use icu_properties::provider::{PropertyEnumBidiMirroringGlyphV1, PropertyNameShortScriptV1};
+use icu_properties::{CodePointMapData, CodePointMapDataBorrowed, PropertyNamesShort};
+use icu_provider::{DataError, DataPayload, DataProvider, DataRequest};
+use icu_segmenter::options::{
+    LineBreakOptions, LineBreakWordOption, WordBreakInvariantOptions, WordBreakOptions,
+};
+use icu_segmenter::provider::{
+    SegmenterBreakGraphemeClusterV1, SegmenterBreakLineV1, SegmenterBreakWordOverrideV1,
+    SegmenterBreakWordV1, SegmenterDictionaryAutoV1, SegmenterDictionaryExtendedV1,
+};
 use icu_segmenter::{
     GraphemeClusterSegmenter, GraphemeClusterSegmenterBorrowed, LineSegmenter,
     LineSegmenterBorrowed, WordSegmenter, WordSegmenterBorrowed,
 };
 use parley_data::Properties;
+use parley_data::provider::ParleyCompositePropertiesV1;
 
-pub(crate) struct AnalysisDataSources;
+/// The Unicode data Parley analyses text with: the tables and segmenters
+/// compiled into its crates, or those built from data handed to a
+/// [`LayoutContext`] (see [`LayoutContext::try_new_unstable`]).
+pub(crate) struct AnalysisDataSources {
+    handed: Option<Box<HandedData>>,
+}
+
+/// What Parley builds once from the data handed to a [`LayoutContext`].
+struct HandedData {
+    properties: DataPayload<ParleyCompositePropertiesV1>,
+    grapheme: GraphemeClusterSegmenter,
+    word: WordSegmenter,
+    line_normal: LineSegmenter,
+    line_break_all: LineSegmenter,
+    line_keep_all: LineSegmenter,
+    composition: CanonicalComposition,
+    decomposition: CanonicalDecomposition,
+    script_names: PropertyNamesShort<Script>,
+    brackets: CodePointMapData<BidiMirroringGlyph>,
+}
+
+/// A provider of every datum Parley's analysis reads: ICU4X's segmenters
+/// with the dictionaries of the scripts that set no space between words,
+/// its normalizers, the short names of scripts and the mirrored brackets,
+/// and Parley's combined table ([`ParleyCompositePropertiesV1`]).
+pub trait TextDataProvider:
+    DataProvider<ParleyCompositePropertiesV1>
+    + DataProvider<SegmenterBreakGraphemeClusterV1>
+    + DataProvider<SegmenterBreakWordV1>
+    + DataProvider<SegmenterBreakWordOverrideV1>
+    + DataProvider<SegmenterBreakLineV1>
+    + DataProvider<SegmenterDictionaryAutoV1>
+    + DataProvider<SegmenterDictionaryExtendedV1>
+    + DataProvider<NormalizerNfcV1>
+    + DataProvider<NormalizerNfdDataV1>
+    + DataProvider<NormalizerNfdTablesV1>
+    + DataProvider<NormalizerNfdSupplementV1>
+    + DataProvider<PropertyNameShortScriptV1>
+    + DataProvider<PropertyEnumBidiMirroringGlyphV1>
+{
+}
+
+impl<P> TextDataProvider for P where
+    P: DataProvider<ParleyCompositePropertiesV1>
+        + DataProvider<SegmenterBreakGraphemeClusterV1>
+        + DataProvider<SegmenterBreakWordV1>
+        + DataProvider<SegmenterBreakWordOverrideV1>
+        + DataProvider<SegmenterBreakLineV1>
+        + DataProvider<SegmenterDictionaryAutoV1>
+        + DataProvider<SegmenterDictionaryExtendedV1>
+        + DataProvider<NormalizerNfcV1>
+        + DataProvider<NormalizerNfdDataV1>
+        + DataProvider<NormalizerNfdTablesV1>
+        + DataProvider<NormalizerNfdSupplementV1>
+        + DataProvider<PropertyNameShortScriptV1>
+        + DataProvider<PropertyEnumBidiMirroringGlyphV1>
+        + ?Sized
+{
+}
+
+fn line_options(word_option: LineBreakWordOption) -> LineBreakOptions<'static> {
+    let mut options = LineBreakOptions::default();
+    options.word_option = Some(word_option);
+    options
+}
 
 impl AnalysisDataSources {
     pub(crate) fn new() -> Self {
-        Self
+        Self { handed: None }
+    }
+
+    /// The sources built from `provider`, with the dictionaries of every
+    /// script ICU4X segments by one.
+    pub(crate) fn try_new_unstable<P: TextDataProvider + ?Sized>(
+        provider: &P,
+    ) -> Result<Self, DataError> {
+        let line = |word_option| {
+            LineSegmenter::try_new_dictionary_unstable(provider, line_options(word_option))
+        };
+        let properties: DataPayload<ParleyCompositePropertiesV1> =
+            provider.load(DataRequest::default())?.payload;
+        Ok(Self {
+            handed: Some(Box::new(HandedData {
+                properties,
+                grapheme: GraphemeClusterSegmenter::try_new_unstable(provider)?,
+                word: WordSegmenter::try_new_dictionary_unstable(
+                    provider,
+                    WordBreakOptions::default(),
+                )?,
+                line_normal: line(LineBreakWordOption::Normal)?,
+                line_break_all: line(LineBreakWordOption::BreakAll)?,
+                line_keep_all: line(LineBreakWordOption::KeepAll)?,
+                composition: CanonicalComposition::try_new_unstable(provider)?,
+                decomposition: CanonicalDecomposition::try_new_unstable(provider)?,
+                script_names: PropertyNamesShort::try_new_unstable(provider)?,
+                brackets: CodePointMapData::try_new_unstable(provider)?,
+            })),
+        })
     }
 
     #[inline(always)]
     pub(crate) fn properties(&self, c: char) -> Properties {
-        Properties::get(c)
+        match &self.handed {
+            Some(handed) => Properties::from(handed.properties.get().trie.get32(u32::from(c))),
+            None => Properties::get(c),
+        }
     }
 
     #[inline(always)]
     pub(crate) fn grapheme_segmenter(&self) -> GraphemeClusterSegmenterBorrowed<'_> {
-        const { GraphemeClusterSegmenter::new() }
+        match &self.handed {
+            Some(handed) => handed.grapheme.as_borrowed(),
+            None => const { GraphemeClusterSegmenter::new() },
+        }
     }
 
     #[inline(always)]
-    fn word_segmenter(&self) -> WordSegmenterBorrowed<'static> {
-        const { WordSegmenter::new_for_non_complex_scripts(WordBreakInvariantOptions::default()) }
+    fn word_segmenter(&self) -> WordSegmenterBorrowed<'_> {
+        match &self.handed {
+            Some(handed) => handed.word.as_borrowed(),
+            None => {
+                const { WordSegmenter::new_for_non_complex_scripts(WordBreakInvariantOptions::default()) }
+            }
+        }
     }
 
     #[inline(always)]
-    fn line_segmenter(&self, word_break_strength: WordBreak) -> LineSegmenterBorrowed<'static> {
+    fn line_segmenter(&self, word_break_strength: WordBreak) -> LineSegmenterBorrowed<'_> {
+        if let Some(handed) = &self.handed {
+            return match word_break_strength {
+                WordBreak::Normal => handed.line_normal.as_borrowed(),
+                WordBreak::BreakAll => handed.line_break_all.as_borrowed(),
+                WordBreak::KeepAll => handed.line_keep_all.as_borrowed(),
+            };
+        }
         match word_break_strength {
             WordBreak::Normal => {
                 const {
@@ -75,22 +197,35 @@ impl AnalysisDataSources {
 
     #[inline(always)]
     fn composing_normalizer(&self) -> CanonicalCompositionBorrowed<'_> {
-        const { CanonicalComposition::new() }
+        match &self.handed {
+            Some(handed) => handed.composition.as_borrowed(),
+            None => const { CanonicalComposition::new() },
+        }
     }
 
     #[inline(always)]
     fn decomposing_normalizer(&self) -> CanonicalDecompositionBorrowed<'_> {
-        const { CanonicalDecomposition::new() }
+        match &self.handed {
+            Some(handed) => handed.decomposition.as_borrowed(),
+            None => const { CanonicalDecomposition::new() },
+        }
     }
 
+    /// The short name of `script` (ISO 15924), where it has one.
     #[inline(always)]
-    pub(crate) fn script_short_name(&self) -> PropertyNamesShortBorrowed<'static, Script> {
-        PropertyNamesShort::new()
+    pub(crate) fn script_short_name(&self, script: Script) -> Option<&str> {
+        match &self.handed {
+            Some(handed) => handed.script_names.as_borrowed().get(script),
+            None => PropertyNamesShort::new().get(script),
+        }
     }
 
     #[inline(always)]
     fn brackets(&self) -> CodePointMapDataBorrowed<'_, BidiMirroringGlyph> {
-        const { CodePointMapData::new() }
+        match &self.handed {
+            Some(handed) => handed.brackets.as_borrowed(),
+            None => const { CodePointMapData::new() },
+        }
     }
 }
 

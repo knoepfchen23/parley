@@ -87,12 +87,76 @@ impl TestContext {
     }
 }
 
+/// Analyses `text` with the data compiled into Parley, and again with the
+/// same data handed to the context through a provider
+/// (`LayoutContext::try_new_unstable`), which must analyse it alike: every
+/// property, and the boundaries wherever no script segmented by a
+/// dictionary is in the text.
 fn verify_analysis(
     text: &str,
-    configure_builder: impl for<'a> FnOnce(&mut RangedBuilder<'a, [u8; 4]>),
+    configure_builder: impl for<'a> Fn(&mut RangedBuilder<'a, [u8; 4]>),
 ) -> TestContext {
-    let mut test_context = TestContext::default();
+    let compiled = analyse(TestContext::default(), text, &configure_builder);
+    let handed = analyse(
+        TestContext {
+            layout_context: super::test_text_data::handed_context(),
+            font_context: FontContext::default(),
+        },
+        text,
+        &configure_builder,
+    );
+    let infos = |context: &TestContext| -> Vec<_> {
+        context
+            .layout_context
+            .info
+            .iter()
+            .map(|(info, style)| {
+                (
+                    info.script,
+                    info.grapheme_cluster_break,
+                    info.bidi_class,
+                    info.bracket,
+                    info.is_control(),
+                    info.contributes_to_shaping(),
+                    info.force_normalize(),
+                    *style,
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        infos(&handed),
+        infos(&compiled),
+        "handed data analyse alike"
+    );
+    assert_eq!(
+        handed.layout_context.bidi.levels(),
+        compiled.layout_context.bidi.levels(),
+        "handed data order alike"
+    );
+    if !super::test_text_data::segmented_by_dictionary(text) {
+        let boundaries = |context: &TestContext| -> Vec<_> {
+            context
+                .layout_context
+                .info
+                .iter()
+                .map(|(info, _)| info.boundary)
+                .collect()
+        };
+        assert_eq!(
+            boundaries(&handed),
+            boundaries(&compiled),
+            "handed data break alike"
+        );
+    }
+    compiled
+}
 
+fn analyse(
+    mut test_context: TestContext,
+    text: &str,
+    configure_builder: &impl for<'a> Fn(&mut RangedBuilder<'a, [u8; 4]>),
+) -> TestContext {
     {
         let mut builder = test_context.layout_context.ranged_builder(
             &mut test_context.font_context,

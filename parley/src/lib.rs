@@ -131,12 +131,14 @@ mod tests;
 pub use linebender_resource_handle::FontData;
 pub use util::BoundingBox;
 
+pub use analysis::TextDataProvider;
 pub use builder::{RangedBuilder, StyleRunBuilder, TreeBuilder};
 pub use context::LayoutContext;
 pub use font::FontContext;
 pub use inline_box::InlineBox;
 #[doc(inline)]
 pub use layout::Layout;
+pub use parley_data::provider as data_provider;
 
 pub use editing::*;
 pub use layout::*;

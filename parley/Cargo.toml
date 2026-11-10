@@ -23,6 +23,15 @@ libm = ["fontique/libm", "peniko/libm", "skrifa/libm", "dep:core_maths"]
 # Enables support for system font backends
 system = ["std", "fontique/system"]
 accesskit = ["dep:accesskit"]
+# `LayoutContext::try_new_with_buffer_provider`: Unicode data deserialized
+# from ICU4X's exported form, as a postcard blob.
+serde = [
+    "parley_data/serde",
+    "icu_normalizer/serde",
+    "icu_properties/serde",
+    "icu_provider/serde",
+    "icu_segmenter/serde",
+]
 
 [dependencies]
 skrifa = { workspace = true }
@@ -37,8 +46,11 @@ harfrust = { workspace = true }
 icu_normalizer = { workspace = true, features = ["compiled_data"] }
 icu_properties = { workspace = true, features = ["compiled_data"] }
 icu_segmenter = { workspace = true, features = ["compiled_data"] }
+icu_provider = { workspace = true }
 
 [dev-dependencies]
+icu_collections = { workspace = true, features = ["alloc"] }
+parley_data_gen = { workspace = true }
 parley_dev = { workspace = true }
 peniko = { workspace = true }
 tiny-skia = "0.11.4"

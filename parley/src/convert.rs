@@ -10,8 +10,7 @@ pub(crate) fn script_to_fontique(
     analysis_data_sources: &AnalysisDataSources,
 ) -> fontique::Script {
     analysis_data_sources
-        .script_short_name()
-        .get(script)
+        .script_short_name(script)
         .unwrap_or("Zzzz")
         .parse()
         .unwrap_or(fontique::Script::UNKNOWN)
