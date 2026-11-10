@@ -1534,8 +1534,7 @@ dependencies = [
 [[package]]
 name = "harfrust"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9da2e5ae821f6e96664977bf974d6d6a2d6682f9ccee23e62ec1d134246845f9"
+source = "git+https://github.com/knoepfchen23/harfrust?tag=harfrust-0.5.2-mosaik.1#775d417697e403367945be084f70ff175c031239"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",

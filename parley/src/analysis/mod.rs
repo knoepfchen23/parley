@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 pub(crate) mod cluster;
+pub(crate) mod shaping;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -18,7 +19,10 @@ use icu_normalizer::provider::{
     NormalizerNfcV1, NormalizerNfdDataV1, NormalizerNfdSupplementV1, NormalizerNfdTablesV1,
 };
 use icu_properties::props::{BidiMirroringGlyph, GeneralCategory, GraphemeClusterBreak, Script};
-use icu_properties::provider::{PropertyEnumBidiMirroringGlyphV1, PropertyNameShortScriptV1};
+use icu_properties::provider::{
+    PropertyBinaryExtendedPictographicV1, PropertyEnumBidiMirroringGlyphV1,
+    PropertyNameShortScriptV1,
+};
 use icu_properties::{CodePointMapData, CodePointMapDataBorrowed, PropertyNamesShort};
 use icu_provider::{DataError, DataPayload, DataProvider, DataRequest};
 use icu_segmenter::options::{
@@ -54,9 +58,11 @@ struct HandedData {
     decomposition: CanonicalDecomposition,
     script_names: PropertyNamesShort<Script>,
     brackets: CodePointMapData<BidiMirroringGlyph>,
+    /// The same data for `HarfRust`'s shaping.
+    shaping: alloc::sync::Arc<shaping::ShapingProperties>,
 }
 
-/// A provider of every datum Parley's analysis reads: ICU4X's segmenters
+/// A provider of every datum Parley's analysis reads: `ICU4X`'s segmenters
 /// with the dictionaries of the scripts that set no space between words,
 /// its normalizers, the short names of scripts and the mirrored brackets,
 /// and Parley's combined table ([`ParleyCompositePropertiesV1`]).
@@ -74,6 +80,7 @@ pub trait TextDataProvider:
     + DataProvider<NormalizerNfdSupplementV1>
     + DataProvider<PropertyNameShortScriptV1>
     + DataProvider<PropertyEnumBidiMirroringGlyphV1>
+    + DataProvider<PropertyBinaryExtendedPictographicV1>
 {
 }
 
@@ -91,6 +98,7 @@ impl<P> TextDataProvider for P where
         + DataProvider<NormalizerNfdSupplementV1>
         + DataProvider<PropertyNameShortScriptV1>
         + DataProvider<PropertyEnumBidiMirroringGlyphV1>
+        + DataProvider<PropertyBinaryExtendedPictographicV1>
         + ?Sized
 {
 }
@@ -107,7 +115,7 @@ impl AnalysisDataSources {
     }
 
     /// The sources built from `provider`, with the dictionaries of every
-    /// script ICU4X segments by one.
+    /// script `ICU4X` segments by one.
     pub(crate) fn try_new_unstable<P: TextDataProvider + ?Sized>(
         provider: &P,
     ) -> Result<Self, DataError> {
@@ -131,8 +139,21 @@ impl AnalysisDataSources {
                 decomposition: CanonicalDecomposition::try_new_unstable(provider)?,
                 script_names: PropertyNamesShort::try_new_unstable(provider)?,
                 brackets: CodePointMapData::try_new_unstable(provider)?,
+                shaping: alloc::sync::Arc::new(shaping::ShapingProperties::try_new_unstable(
+                    provider,
+                )?),
             })),
         })
+    }
+
+    /// The Unicode properties `HarfRust` shapes with: the handed data's, or
+    /// `None` for `HarfRust`'s own tables.
+    pub(crate) fn shaping_properties(
+        &self,
+    ) -> Option<alloc::sync::Arc<dyn harfrust::UnicodeFuncs>> {
+        self.handed
+            .as_ref()
+            .map(|handed| handed.shaping.clone() as alloc::sync::Arc<dyn harfrust::UnicodeFuncs>)
     }
 
     #[inline(always)]

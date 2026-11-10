@@ -15,7 +15,10 @@ use icu_normalizer::provider::{
     NormalizerNfcV1, NormalizerNfdDataV1, NormalizerNfdSupplementV1, NormalizerNfdTablesV1,
 };
 use icu_properties::props::{BidiClass, GeneralCategory, GraphemeClusterBreak, Script};
-use icu_properties::provider::{PropertyEnumBidiMirroringGlyphV1, PropertyNameShortScriptV1};
+use icu_properties::provider::{
+    PropertyBinaryExtendedPictographicV1, PropertyEnumBidiMirroringGlyphV1,
+    PropertyNameShortScriptV1,
+};
 use icu_provider::{
     DataError, DataPayload, DataProvider, DataRequest, DataResponse, DataResponseMetadata,
 };
@@ -28,7 +31,7 @@ use icu_segmenter::{LineSegmenter, WordSegmenter};
 use parley_data::Properties;
 use std::sync::OnceLock;
 
-/// ICU4X's compiled data and a combined table, behind one provider, as an
+/// `ICU4X`'s compiled data and a combined table, behind one provider, as an
 /// application hands its own data to Parley.
 struct TestData {
     composite: CompositeProperties<'static>,
@@ -63,6 +66,7 @@ delegate!(icu_normalizer::provider::Baked =>
 delegate!(icu_properties::provider::Baked =>
     PropertyNameShortScriptV1,
     PropertyEnumBidiMirroringGlyphV1,
+    PropertyBinaryExtendedPictographicV1,
 );
 
 impl DataProvider<ParleyCompositePropertiesV1> for TestData {
@@ -77,14 +81,14 @@ impl DataProvider<ParleyCompositePropertiesV1> for TestData {
     }
 }
 
-/// The combined table built from ICU4X's compiled data, once: the same
+/// The combined table built from `ICU4X`'s compiled data, once: the same
 /// values as the table compiled into `parley_data`.
 fn compiled_table() -> &'static CompositeProperties<'static> {
     static TABLE: OnceLock<CompositeProperties<'static>> = OnceLock::new();
     TABLE.get_or_init(parley_data_gen::composite_properties)
 }
 
-/// A context with ICU4X's compiled data and the combined table handed to it.
+/// A context with `ICU4X`'s compiled data and the combined table handed to it.
 pub(super) fn handed_context() -> LayoutContext {
     LayoutContext::try_new_unstable(&TestData {
         composite: compiled_table().clone(),
@@ -92,7 +96,7 @@ pub(super) fn handed_context() -> LayoutContext {
     .expect("every datum Parley reads")
 }
 
-/// Whether `text` holds a character of a script ICU4X segments by a
+/// Whether `text` holds a character of a script `ICU4X` segments by a
 /// dictionary, where data handed with the dictionaries break otherwise than
 /// Parley's compiled segmenters.
 pub(super) fn segmented_by_dictionary(text: &str) -> bool {
@@ -123,7 +127,7 @@ fn boundaries(mut layout_context: LayoutContext, text: &str) -> Vec<(usize, Boun
         .collect()
 }
 
-/// The offsets inside `text` where a line may break, by ICU4X's segmenter
+/// The offsets inside `text` where a line may break, by `ICU4X`'s segmenter
 /// with the dictionaries.
 fn icu_line_breaks(text: &str) -> Vec<usize> {
     LineSegmenter::new_dictionary(LineBreakOptions::default())
@@ -132,7 +136,7 @@ fn icu_line_breaks(text: &str) -> Vec<usize> {
         .collect()
 }
 
-/// The offsets inside `text` where a word begins, by ICU4X's segmenter with
+/// The offsets inside `text` where a word begins, by `ICU4X`'s segmenter with
 /// the dictionaries.
 fn icu_word_starts(text: &str) -> Vec<usize> {
     WordSegmenter::new_dictionary(WordBreakInvariantOptions::default())
@@ -286,4 +290,49 @@ fn the_built_table_equals_the_compiled_one() {
             "U+{cp:04X}"
         );
     }
+}
+
+/// `HarfRust` shapes with the handed data's properties, which are its own
+/// wherever both are of one Unicode version (Mosaik 9.4.7.1.3.10.3).
+#[test]
+fn shaping_reads_the_properties_harfrust_has_of_its_own() {
+    use harfrust::UnicodeFuncs;
+    let handed = crate::analysis::shaping::ShapingProperties::try_new_unstable(&TestData {
+        composite: compiled_table().clone(),
+    })
+    .unwrap();
+    let own = harfrust::BuiltinUnicodeFuncs;
+    let mut differ: Vec<(&str, u32)> = Vec::new();
+    for u in (0_u32..=0x10_FFFF).filter(|&u| char::from_u32(u).is_some()) {
+        if handed.general_category(u) != own.general_category(u) {
+            differ.push(("general category", u));
+        }
+        if handed.combining_class(u) != own.combining_class(u) {
+            differ.push(("combining class", u));
+        }
+        if handed.mirroring(u) != own.mirroring(u) {
+            differ.push(("mirroring", u));
+        }
+        if handed.script(u) != own.script(u) {
+            differ.push(("script", u));
+        }
+        if handed.is_extended_pictographic(u) != own.is_extended_pictographic(u) {
+            differ.push(("extended pictographic", u));
+        }
+        let decomposed = own.decompose(u);
+        if handed.decompose(u) != decomposed {
+            differ.push(("decomposition", u));
+        }
+        if let Some((a, b)) = decomposed {
+            if b != 0 && handed.compose(a, b) != own.compose(a, b) {
+                differ.push(("composition", u));
+            }
+        }
+    }
+    assert!(
+        differ.is_empty(),
+        "{} differ, the first {:04X?}",
+        differ.len(),
+        &differ[..differ.len().min(12)]
+    );
 }

@@ -423,6 +423,7 @@ fn shape_item<'a, B: Brush>(
         // Prepare harfrust buffer
         let mut buffer = mem::take(&mut scx.unicode_buffer).unwrap();
         buffer.clear();
+        buffer.set_unicode_funcs(analysis_data_sources.shaping_properties());
 
         // Use the entire segment text including newlines
         buffer.reserve(segment_text.len());
